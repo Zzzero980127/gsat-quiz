@@ -14,6 +14,9 @@
 
   // ---------- 更新日誌（新版本加在最上面） ----------
   var CHANGELOG = [
+    { v: '1.2', date: '2026-10-12', items: [
+      '作答到一半網頁被重新整理也不會不見：題目、已選答案都會自動接回來'
+    ] },
     { v: '1.1', date: '2026-10-12', items: [
       '新增「難度模式」切換：簡單版／困難版（學測類似題），四科都有困難題',
       '困難版仿學測歷屆試題風格：素養情境題、長題幹、多重判斷（甲乙丙丁）、圖表判讀，有圖的題目用示意圖並隨數字變化',
@@ -219,6 +222,32 @@
   // ---------- 出題 ----------
   var session = null;
 
+  // 作答中的進度暫存在 sessionStorage：網頁被重新整理也能接著寫
+  var CUR_KEY = KEY + '-cur';
+  function saveCur() {
+    var s = session;
+    try {
+      if (!s || s.done || $('quiz').classList.contains('hidden')) { sessionStorage.removeItem(CUR_KEY); return; }
+      sessionStorage.setItem(CUR_KEY, JSON.stringify({
+        qs: s.qs.map(function (q) { return { id: q.tpl.id, q: q.q, exp: q.exp, fig: q.fig, opts: q.opts, ans: q.ans }; }),
+        i: s.i, title: s.title, exam: s.exam, picks: s.picks, end: s.end || 0, answered: !!s.answered,
+        results: s.results.map(function (r) { return { k: s.qs.indexOf(r.q), mine: r.mine, ok: r.ok }; })
+      }));
+    } catch (e) {}
+  }
+  function restoreCur() {
+    var o; try { o = JSON.parse(sessionStorage.getItem(CUR_KEY)); } catch (e) {}
+    if (!o || !o.qs || !o.qs.every(function (q) { return TPL_BY_ID[q.id]; })) return false;
+    var qs = o.qs.map(function (q) { return { tpl: TPL_BY_ID[q.id], q: q.q, exp: q.exp, fig: q.fig, opts: q.opts, ans: q.ans }; });
+    session = { qs: qs, i: o.i, title: o.title, exam: o.exam, picks: o.picks,
+      results: o.results.map(function (r) { return { q: qs[r.k], mine: r.mine, ok: r.ok }; }) };
+    show('quiz'); renderQ();
+    if (!o.exam && o.answered) showAnswer(o.results[o.results.length - 1].mine);
+    return true;
+  }
+  window.addEventListener('pagehide', saveCur);
+  document.addEventListener('visibilitychange', function () { if (document.hidden) saveCur(); });
+
   function makeQuestions(tpls, count, opts) {
     opts = opts || {};
     var list = shuffle(tpls);
@@ -287,14 +316,12 @@
     $('qFeedback').innerHTML = '';
     $('nextBtn').classList.add('hidden');
     s.answered = false;
+    saveCur();
   }
 
   function answer(i) {
     var s = session; if (s.answered) return; s.answered = true;
     var q = s.qs[s.i], t = q.tpl, ok = i === q.ans;
-    var btns = $('qOpts').children;
-    for (var k = 0; k < btns.length; k++) { btns[k].disabled = true; if (k === q.ans) btns[k].classList.add('ok'); }
-    if (!ok) btns[i].classList.add('bad');
 
     // 紀錄：主題正確率
     var key = tagKey(t);
@@ -312,6 +339,15 @@
     save();
 
     s.results.push({ q: q, mine: i, ok: ok });
+    showAnswer(i);
+    saveCur();
+  }
+  function showAnswer(i) {
+    var s = session, q = s.qs[s.i], ok = i === q.ans;
+    s.answered = true;
+    var btns = $('qOpts').children;
+    for (var k = 0; k < btns.length; k++) { btns[k].disabled = true; if (k === q.ans) btns[k].classList.add('ok'); }
+    if (!ok) btns[i].classList.add('bad');
     $('qFeedback').innerHTML = '<div class="exp"><div class="verdict ' + (ok ? 'ok">✔ 答對了' : 'bad">✘ 答錯了，正解是 ' + (q.ans + 1) + '. ' + fmt(q.opts[q.ans])) + '</div>' + fmt(q.exp) + '</div>';
     $('nextBtn').classList.remove('hidden');
     $('nextBtn').textContent = s.i + 1 < s.qs.length ? '下一題 ▶' : '看成績';
@@ -381,6 +417,7 @@
   // ---------- 畫面切換 ----------
   function show(id) {
     ['home', 'quiz', 'result', 'log'].forEach(function (x) { $(x).classList.toggle('hidden', x !== id); });
+    if (id !== 'quiz') try { sessionStorage.removeItem(CUR_KEY); } catch (e) {}
     window.scrollTo(0, 0);
   }
 
@@ -441,4 +478,5 @@
   };
 
   renderHome();
+  restoreCur();
 })();
